@@ -1,29 +1,41 @@
 from __future__ import annotations
 
-import base64
 import os
 import sqlite3
-import time
 from pathlib import Path
 from typing import Any
 
+import jwt
 import urllib3
 from fastapi import Body, Depends, FastAPI, File, Header, HTTPException, Query, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
-LEGACY_SECRET = "WORKSHOP_SECRET_2026"
+WORKSHOP_CLIENT = "angular-workshop"
+
+
+def auth_secret() -> str:
+    secret = os.getenv("AUTH_TOKEN_SECRET")
+    if secret is None or len(secret.encode("utf-8")) < 32:
+        raise RuntimeError("AUTH_TOKEN_SECRET must contain at least 32 UTF-8 bytes")
+    return secret
 
 
 def legacy_identity(authorization: str = Header(default="")) -> dict[str, str]:
+    scheme, separator, token = authorization.partition(" ")
+    if not separator or scheme.lower() != "bearer" or not token:
+        raise HTTPException(status_code=401, detail="Invalid token")
     try:
-        token = authorization.replace("Bearer ", "")
-        decoded = base64.b64decode(token).decode("utf-8")
-        parts = decoded.split("|")
-        if len(parts) != 4 or parts[3] != LEGACY_SECRET or int(parts[2]) < int(time.time()):
-            raise ValueError("invalid token")
-        return {"username": parts[0], "role": parts[1]}
-    except Exception as error:
-        raise HTTPException(status_code=401, detail="Invalid token: " + str(error)) from error
+        claims = jwt.decode(
+            token,
+            auth_secret(),
+            algorithms=["HS256"],
+            options={"require": ["sub", "client", "iat", "exp"]},
+        )
+    except jwt.InvalidTokenError as error:
+        raise HTTPException(status_code=401, detail="Invalid token") from error
+    if claims["client"] != WORKSHOP_CLIENT or not isinstance(claims["sub"], str) or not claims["sub"]:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return {"username": claims["sub"], "role": str(claims.get("role", ""))}
 
 
 def create_app(db_path: str | None = None, upload_dir: str | None = None) -> FastAPI:
@@ -52,6 +64,10 @@ def create_app(db_path: str | None = None, upload_dir: str | None = None) -> Fas
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    @app.on_event("startup")
+    def validate_auth_configuration() -> None:
+        auth_secret()
 
     def as_task(row: sqlite3.Row) -> dict[str, Any]:
         return {

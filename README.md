@@ -8,6 +8,11 @@ API FastAPI que administra tareas del workshop y recibe archivos de requerimient
 
 Requisitos: Python 3.13.
 
+Antes de iniciar, configura `AUTH_TOKEN_SECRET` con el mismo valor que usa
+`workshop-auth-backend`; debe contener al menos 32 bytes UTF-8. No existe un
+valor predeterminado y la aplicación no inicia si falta o es demasiado corto.
+No guardes el secreto en el repositorio.
+
 ```bash
 python -m venv .venv
 # Linux/macOS: source .venv/bin/activate
@@ -26,4 +31,6 @@ Swagger: `http://localhost:8000/docs`
 - `POST /api/requirements`
 - `GET /api/backend-health`
 
-La rama `main` contiene autenticación débil, SQL concatenado, manejo inseguro de nombres de archivo, conexión global, lógica monolítica y dependencias con CVEs.
+La API valida tokens JWT HS256 emitidos por el backend Quarkus. Requiere los
+claims `sub`, `client`, `iat` y `exp` y solo admite `client=angular-workshop`;
+los tokens Base64 anteriores se rechazan.
